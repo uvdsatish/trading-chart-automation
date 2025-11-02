@@ -1,0 +1,59 @@
+stockcharts:
+  base_url: "https://stockcharts.com"
+  login_url: "https://stockcharts.com/h-sc/ui"
+  gallery_url: "https://stockcharts.com/mygallery/"
+  
+  # Selectors (may need adjustment based on actual site)
+  selectors:
+    username_field: "input[name='username'], input[type='email'], #username"
+    password_field: "input[name='password'], input[type='password'], #password"
+    login_button: "button[type='submit'], input[type='submit']"
+    chart_container: ".chart-image, #chartImg, img[alt*='chart']"
+    
+  # Wait times (in milliseconds)
+  timeouts:
+    navigation: 30000
+    login: 10000
+    chart_load: 15000
+
+browser:
+  viewport:
+    width: 1920
+    height: 1080
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  
+ai_analysis:
+  prompts:
+    chart_pattern_detection: |
+      Analyze this stock chart and provide:
+      1. Identified chart patterns (triangles, head & shoulders, flags, etc.)
+      2. Current trend direction and strength (1-10)
+      3. Key support levels (list up to 3 prices)
+      4. Key resistance levels (list up to 3 prices)
+      5. Recommended alert levels with reasoning
+      6. Risk assessment (low/medium/high)
+      
+      Format response as JSON with these exact keys:
+      {
+        "patterns": [],
+        "trend": {"direction": "", "strength": 0},
+        "support_levels": [],
+        "resistance_levels": [],
+        "recommended_alerts": [],
+        "risk_level": ""
+      }
+    
+    technical_indicator_analysis: |
+      Analyze the technical indicators visible in this chart:
+      1. RSI reading and interpretation
+      2. MACD signal (bullish/bearish)
+      3. Moving average alignment
+      4. Volume analysis
+      5. Trading recommendation (buy/sell/hold)
+      
+      Provide concise, actionable insights.
+
+poc_test_tickers:
+  - AAPL
+  - MSFT
+  - SPY
