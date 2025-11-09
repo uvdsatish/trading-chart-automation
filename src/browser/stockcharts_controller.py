@@ -42,6 +42,7 @@ class StockChartsController:
         # State tracking
         self.is_logged_in = False
         self.current_ticker: Optional[str] = None
+        self.current_chartlist: Optional[str] = None  # Cache current ChartList to avoid re-selection
         
         # Ensure screenshot directory exists
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
@@ -74,12 +75,25 @@ class StockChartsController:
         viewport = self.config.get('browser', {}).get('viewport', {})
         user_agent = self.config.get('browser', {}).get('user_agent')
 
+        # Check for saved session state
+        from pathlib import Path
+        session_file = Path("browser_session.json")
+        storage_state = None
+
+        if session_file.exists():
+            try:
+                logger.info("Found saved browser session, attempting to restore...")
+                storage_state = session_file.as_posix()
+            except Exception as e:
+                logger.warning(f"Could not load session file: {e}")
+
         # In headed mode (not headless), don't constrain viewport to allow full screen
         if not self.headless:
             # Use no_viewport=True for true fullscreen (Python-specific syntax)
             self.context = await self.browser.new_context(
                 no_viewport=True,  # Proper Python syntax for no viewport constraint
-                user_agent=user_agent
+                user_agent=user_agent,
+                storage_state=storage_state  # Load saved session if available
             )
             width, height = FullscreenManager.get_monitor_dimensions()
             logger.info(f"Browser launched for {width}x{height} monitor with AGGRESSIVE FULLSCREEN")
@@ -87,7 +101,8 @@ class StockChartsController:
             # Headless mode: use fixed viewport
             self.context = await self.browser.new_context(
                 viewport=viewport or {'width': 1920, 'height': 1080},
-                user_agent=user_agent
+                user_agent=user_agent,
+                storage_state=storage_state  # Load saved session if available
             )
             logger.info(f"Browser launched with viewport: {viewport or {'width': 1920, 'height': 1080}}")
 
@@ -111,6 +126,23 @@ class StockChartsController:
         # Set default timeout
         timeout = self.config.get('stockcharts', {}).get('timeouts', {}).get('navigation', 30000)
         self.page.set_default_timeout(timeout)
+
+        # Check if session was restored successfully
+        if storage_state and session_file.exists():
+            # Try navigating to a protected page to verify session is valid
+            try:
+                logger.info("Verifying restored session...")
+                await self.page.goto("https://stockcharts.com/panels/", wait_until='domcontentloaded')
+
+                # Check for logout link (indicates we're logged in)
+                try:
+                    await self.page.wait_for_selector("a:has-text('Log Out')", timeout=3000)
+                    self.is_logged_in = True
+                    logger.info("[SUCCESS] Session restored successfully - skipping login!")
+                except:
+                    logger.warning("Session expired or invalid, will need to login normally")
+            except Exception as e:
+                logger.warning(f"Could not verify session: {e}")
 
         logger.info("Browser initialized successfully")
 
@@ -749,49 +781,21 @@ class StockChartsController:
         try:
             logger.info("Attempting login to StockCharts.com...")
 
-            # STEP 1: Navigate to homepage first
-            homepage_url = "https://stockcharts.com"
-            logger.info(f"Step 1: Navigating to homepage: {homepage_url}")
-            await self.page.goto(homepage_url, wait_until='networkidle')
-            await asyncio.sleep(2)
+            # STEP 1: Navigate directly to login page (skip homepage for speed)
+            login_url = "https://stockcharts.com/login/index.php"
+            logger.info(f"Step 1: Navigating directly to login page: {login_url}")
+            await self.page.goto(login_url, wait_until='domcontentloaded')
 
-            await self._save_screenshot("01_homepage")
+            # Wait for login form to be visible
+            try:
+                await self.page.wait_for_selector("input[type='email']", state='visible', timeout=3000)
+            except:
+                await asyncio.sleep(0.5)  # Short fallback
 
-            # STEP 2: Find and click "Log In" button in header
-            logger.info("Step 2: Looking for 'Log In' button in header...")
-            login_button_selectors = [
-                "a:has-text('Log In')",
-                "button:has-text('Log In')",
-                "[href*='login']",
-            ]
+            await self._save_screenshot("01_login_page")
 
-            login_button_clicked = False
-            for selector in login_button_selectors:
-                try:
-                    if await self.page.locator(selector).count() > 0:
-                        logger.info(f"Found 'Log In' button with selector: {selector}")
-                        await self.page.locator(selector).first.click()
-                        login_button_clicked = True
-                        logger.info("Clicked 'Log In' button, waiting for redirect...")
-                        break
-                except Exception as e:
-                    logger.debug(f"Selector {selector} failed: {e}")
-                    continue
-
-            if not login_button_clicked:
-                logger.error("Could not find 'Log In' button on homepage")
-                await self._save_screenshot("error_no_login_button")
-                return False
-
-            # Wait for navigation to login page
-            await asyncio.sleep(3)
-            current_url = self.page.url
-            logger.info(f"Redirected to: {current_url}")
-
-            await self._save_screenshot("02_login_page")
-
-            # STEP 3: Fill in login form
-            logger.info("Step 3: Filling login credentials...")
+            # STEP 2: Fill in login form (we're already on the login page)
+            logger.info("Step 2: Filling login credentials...")
 
             # Find and fill username field (USER ID / EMAIL)
             username_selectors = [
@@ -845,10 +849,10 @@ class StockChartsController:
                 await self._save_screenshot("error_no_password_field")
                 return False
             
-            await self._save_screenshot("03_credentials_filled")
+            await self._save_screenshot("02_credentials_filled")
 
-            # STEP 4: Click the submit button
-            logger.info("Step 4: Submitting login form...")
+            # STEP 3: Click the submit button
+            logger.info("Step 3: Submitting login form...")
             submit_button_selectors = [
                 "button:has-text('Log In')",
                 "button[type='submit']",
@@ -875,19 +879,27 @@ class StockChartsController:
                 logger.warning("Could not find submit button, trying Enter key as fallback")
                 await self.page.keyboard.press('Enter')
 
-            # Wait for navigation after login
+            # Wait for navigation after login (OPTIMIZED)
             logger.info("Waiting for login to complete...")
-            await asyncio.sleep(4)
 
+            # Wait for either logout link (success) or URL change (navigation)
             try:
-                await self.page.wait_for_load_state('networkidle', timeout=10000)
-            except Exception as e:
-                logger.warning(f"Wait for networkidle timed out: {e}")
+                await self.page.wait_for_selector("a:has-text('Log Out')", timeout=5000)
+                logger.info("Login successful - found logout link")
+            except:
+                # Fallback: wait for URL to change from login page
+                try:
+                    await self.page.wait_for_url(lambda url: 'login' not in url.lower(), timeout=5000)
+                    logger.info("Login successful - navigated away from login page")
+                except:
+                    # Last fallback: brief wait
+                    await asyncio.sleep(2)
+                    logger.warning("Could not detect login completion, continuing...")
 
-            await self._save_screenshot("04_after_login_attempt")
+            await self._save_screenshot("03_after_login_attempt")
 
-            # STEP 5: Verify login success
-            logger.info("Step 5: Verifying login success...")
+            # STEP 4: Verify login success
+            logger.info("Step 4: Verifying login success...")
 
             # Check current URL (should not be login page anymore)
             final_url = self.page.url
@@ -909,6 +921,16 @@ class StockChartsController:
                     if await self.page.locator(indicator).count() > 0:
                         self.is_logged_in = True
                         logger.info("[SUCCESS] Login successful!")
+
+                        # Save session state for future runs
+                        try:
+                            from pathlib import Path
+                            session_file = Path("browser_session.json")
+                            await self.context.storage_state(path=session_file.as_posix())
+                            logger.info(f"Session saved to {session_file} for future use")
+                        except Exception as e:
+                            logger.warning(f"Could not save session: {e}")
+
                         return True
                 except:
                     continue
@@ -999,14 +1021,22 @@ class StockChartsController:
                 logger.info("Go button not found, pressing Enter...")
                 await self.page.press(search_box_selector, "Enter")
 
-            # Wait for chart to load
+            # Wait for chart to load (OPTIMIZED)
             logger.info("Waiting for chart to load...")
-            await asyncio.sleep(5)
 
+            # Wait for chart image to be visible instead of fixed sleep
             try:
-                await self.page.wait_for_load_state('networkidle', timeout=10000)
+                await self.page.wait_for_selector('.chart-image, img[src*="chart"], #chartImg',
+                                                 state='visible', timeout=5000)
+                logger.info("Chart image loaded")
             except:
-                logger.warning("Networkidle timeout, continuing anyway...")
+                # Fallback: wait for URL to contain ticker
+                try:
+                    await self.page.wait_for_url(lambda url: ticker in url or 's=' in url.lower(),
+                                                timeout=3000)
+                except:
+                    await asyncio.sleep(2)  # Brief fallback
+                    logger.warning("Could not verify chart load, continuing...")
 
             # Verify we're on a chart page
             current_url = self.page.url
@@ -1038,6 +1068,7 @@ class StockChartsController:
     ) -> bool:
         """
         Navigate to a specific chart within a ChartList using dropdown navigation
+        OPTIMIZED: Caches current ChartList to avoid redundant selections
 
         Args:
             chartlist_name: Name of the ChartList (e.g., "My Watchlist", "S2_SetUps")
@@ -1047,49 +1078,63 @@ class StockChartsController:
             bool: True if successful
         """
         try:
-            logger.info(f"Navigating via dropdown: {chartlist_name} > {chart_name}")
+            import time
+            start_time = time.time()
 
-            # These are the actual selectors discovered through investigation
-            # There are TWO separate dropdown buttons:
-            # 1. ChartList dropdown - Select the list first
-            # 2. Chart dropdown - Then select the specific chart
+            # Check if we need to switch ChartList (OPTIMIZATION)
+            need_chartlist_switch = (self.current_chartlist != chartlist_name)
 
-            # Step 1: Click ChartList dropdown button
-            chartlist_button_selector = "#chart-list-dropdown-menu-toggle-button"
-            chartlist_button = await self.page.query_selector(chartlist_button_selector)
+            if need_chartlist_switch:
+                logger.info(f"[CACHE MISS] Navigating to new ChartList: {chartlist_name} > {chart_name}")
+                logger.info(f"Previous ChartList was: {self.current_chartlist}")
 
-            if not chartlist_button:
-                logger.warning(f"ChartList dropdown button not found with selector: {chartlist_button_selector}")
-                # Fallback to direct navigation
-                logger.info("Falling back to direct URL navigation")
-                return await self.navigate_to_chart(chart_name)
+                # Step 1: Click ChartList dropdown button
+                chartlist_button_selector = "#chart-list-dropdown-menu-toggle-button"
+                chartlist_button = await self.page.query_selector(chartlist_button_selector)
 
-            # Click to open ChartList dropdown
-            logger.info("Clicking ChartList dropdown button...")
-            await chartlist_button.click()
-            await asyncio.sleep(1)  # Wait for dropdown to appear
+                if not chartlist_button:
+                    logger.warning(f"ChartList dropdown button not found with selector: {chartlist_button_selector}")
+                    # Fallback to direct navigation
+                    logger.info("Falling back to direct URL navigation")
+                    return await self.navigate_to_chart(chart_name)
 
-            # Look for the ChartList option in the dropdown menu
-            try:
-                # Try to find and click the ChartList item
-                chartlist_item = await self.page.query_selector(f"text={chartlist_name}")
-                if chartlist_item:
-                    logger.info(f"Clicking ChartList: {chartlist_name}")
-                    await chartlist_item.click()
-                    await asyncio.sleep(2)  # Wait for charts to load
-                else:
-                    # Try with partial match
-                    chartlist_item = await self.page.query_selector(f"*:has-text('{chartlist_name}')")
+                # Click to open ChartList dropdown
+                logger.info("Clicking ChartList dropdown button...")
+                await chartlist_button.click()
+
+                # Smart wait for dropdown to appear
+                try:
+                    await self.page.wait_for_selector('.chartlist-dropdown-menu', state='visible', timeout=3000)
+                except:
+                    await asyncio.sleep(1)  # Fallback to fixed wait
+
+                # Look for the ChartList option in the dropdown menu
+                try:
+                    # Try to find and click the ChartList item
+                    chartlist_item = await self.page.query_selector(f"text={chartlist_name}")
                     if chartlist_item:
+                        logger.info(f"Clicking ChartList: {chartlist_name}")
                         await chartlist_item.click()
-                        await asyncio.sleep(2)
+                        # Update cache AFTER successful selection
+                        self.current_chartlist = chartlist_name
+                        await asyncio.sleep(2)  # Wait for charts to load
                     else:
-                        logger.warning(f"ChartList '{chartlist_name}' not found in dropdown")
-                        return await self.navigate_to_chart(chart_name)
+                        # Try with partial match
+                        chartlist_item = await self.page.query_selector(f"*:has-text('{chartlist_name}')")
+                        if chartlist_item:
+                            await chartlist_item.click()
+                            self.current_chartlist = chartlist_name  # Update cache
+                            await asyncio.sleep(2)
+                        else:
+                            logger.warning(f"ChartList '{chartlist_name}' not found in dropdown")
+                            return await self.navigate_to_chart(chart_name)
 
-            except Exception as e:
-                logger.warning(f"Could not select ChartList: {e}")
-                return await self.navigate_to_chart(chart_name)
+                except Exception as e:
+                    logger.warning(f"Could not select ChartList: {e}")
+                    return await self.navigate_to_chart(chart_name)
+            else:
+                logger.info(f"[CACHE HIT] Already in ChartList '{chartlist_name}', skipping ChartList selection")
+                logger.info(f"Navigating directly to chart: {chart_name}")
 
             # Step 2: Click Chart dropdown button (now should show charts from selected list)
             chart_button_selector = "#charts-dropdown-menu-toggle-button"
@@ -1124,14 +1169,19 @@ class StockChartsController:
                 logger.warning(f"Could not select chart: {e}")
                 return await self.navigate_to_chart(chart_name)
 
-            # Wait for chart to load
-            await asyncio.sleep(3)
+            # Wait for chart to load (OPTIMIZED: replaced networkidle with domcontentloaded)
             try:
-                await self.page.wait_for_load_state('networkidle', timeout=10000)
+                await self.page.wait_for_load_state('domcontentloaded', timeout=5000)
+                # Wait for chart image to be visible
+                await self.page.wait_for_selector('.chart-image', state='visible', timeout=5000)
             except:
-                logger.warning("Networkidle timeout, but continuing...")
+                # Fallback to fixed wait if selectors not found
+                await asyncio.sleep(2)
+                logger.warning("Could not wait for chart image, continuing...")
 
-            logger.info(f"[SUCCESS] Navigated to {chartlist_name} > {chart_name}")
+            elapsed = time.time() - start_time
+            cache_status = "CACHE HIT" if not need_chartlist_switch else "CACHE MISS"
+            logger.info(f"[SUCCESS] Navigated to {chartlist_name} > {chart_name} in {elapsed:.2f}s ({cache_status})")
             return True
 
         except Exception as e:
@@ -1171,8 +1221,15 @@ class StockChartsController:
                                                               'https://stockcharts.com')
             chart_url = f"{base_url}/h-sc/ui?s={ticker}"
             
-            await self.page.goto(chart_url, wait_until='networkidle')
-            await asyncio.sleep(2)  # Give chart time to render
+            # OPTIMIZED: Use domcontentloaded instead of networkidle
+            await self.page.goto(chart_url, wait_until='domcontentloaded')
+
+            # Wait for chart to be visible instead of fixed sleep
+            try:
+                await self.page.wait_for_selector('.chart-image, img[src*="chart"], #chartImg',
+                                                 state='visible', timeout=3000)
+            except:
+                await asyncio.sleep(1)  # Brief fallback if chart not found
             
             self.current_ticker = ticker
             
@@ -1584,14 +1641,34 @@ class StockChartsController:
 
             logger.info(f"Loaded {len(chart_configs)} charts to open")
 
+            # Reset ChartList cache at the start of batch operation
+            self.current_chartlist = None
+            logger.info("ChartList cache reset for new batch operation")
+
             # Navigate to main charts page after login
             logger.info("Navigating to main charts page with AMZN...")
             await self.enter_ticker_in_search_box("AMZN")
-            await asyncio.sleep(3)  # Wait for page to load
+
+            # OPTIMIZED: Wait for ChartList dropdown to be available instead of fixed sleep
+            try:
+                await self.page.wait_for_selector('#chart-list-dropdown-menu-toggle-button',
+                                                 state='visible', timeout=3000)
+                logger.info("ChartList dropdowns available")
+            except:
+                await asyncio.sleep(1)  # Brief fallback
+                logger.warning("ChartList dropdown not found, continuing...")
+
             logger.info("Main charts page loaded - ChartList dropdowns should be available\n")
+
+            # Track total performance
+            import time
+            batch_start_time = time.time()
+            cache_hits = 0
+            cache_misses = 0
 
             # Process each chart in order
             for idx, config in enumerate(chart_configs, 1):
+                chart_start_time = time.time()
                 chartlist_name = config['chartlist']
                 chart_name = config['chart_name']
                 tab_order = config['tab_order']
@@ -1603,6 +1680,13 @@ class StockChartsController:
                     logger.info(f"  Notes: {notes}")
 
                 try:
+                    # Track cache performance
+                    was_cached = (self.current_chartlist == chartlist_name)
+                    if was_cached:
+                        cache_hits += 1
+                    else:
+                        cache_misses += 1
+
                     # Navigate using ChartList dropdown
                     success = await self.navigate_via_chartlist_dropdown(chartlist_name, chart_name)
 
@@ -1613,8 +1697,12 @@ class StockChartsController:
                     # Create new tab (if not first chart)
                     if idx > 1:
                         page = await self.context.new_page()
-                        await page.goto(self.page.url, wait_until='domcontentloaded')
-                        await asyncio.sleep(2)
+                        await page.goto(self.page.url, wait_until='domcontentloaded', timeout=15000)
+                        # Smart wait for chart to load
+                        try:
+                            await page.wait_for_selector('.chart-image', state='visible', timeout=3000)
+                        except:
+                            await asyncio.sleep(1)
                     else:
                         page = self.page
 
@@ -1647,15 +1735,24 @@ class StockChartsController:
                         "notes": notes
                     }
 
-                    logger.info(f"[Tab {tab_order}] [SUCCESS] Opened {chart_name}")
+                    chart_elapsed = time.time() - chart_start_time
+                    logger.info(f"[Tab {tab_order}] [SUCCESS] Opened {chart_name} in {chart_elapsed:.2f}s")
 
                 except Exception as e:
                     logger.error(f"[Tab {tab_order}] Error opening {chart_name}: {e}")
                     continue
 
-            # Summary
+            # Performance Summary
+            total_elapsed = time.time() - batch_start_time
             logger.info("\n" + "=" * 70)
             logger.info(f"ALL TABS OPENED - {len(opened_tabs)}/{len(chart_configs)} successful")
+            logger.info("=" * 70)
+            logger.info(f"[PERFORMANCE SUMMARY]")
+            logger.info(f"  Total time: {total_elapsed:.2f} seconds")
+            logger.info(f"  Average per chart: {total_elapsed/len(chart_configs):.2f} seconds")
+            logger.info(f"  Cache hits: {cache_hits} ({cache_hits/(cache_hits+cache_misses)*100:.1f}%)")
+            logger.info(f"  Cache misses: {cache_misses} ({cache_misses/(cache_hits+cache_misses)*100:.1f}%)")
+            logger.info(f"  Time saved from caching: ~{cache_hits * 3:.1f} seconds")
             logger.info("=" * 70)
 
             if opened_tabs:

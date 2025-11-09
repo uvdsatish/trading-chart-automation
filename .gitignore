@@ -63,3 +63,8 @@ htmlcov/
 # Sensitive data
 credentials.json
 secrets.yaml
+browser_session.json
+
+# Excel temporary files
+~$*.xlsx
+~$*.xls
