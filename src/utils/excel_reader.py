@@ -115,6 +115,44 @@ class ChartListConfigReader:
             logger.error(f"Error loading Excel file: {e}")
             raise
 
+    def load_chartlist_names_only(self) -> List[str]:
+        """
+        Load ChartList names from simple single-column Excel format
+        Used for Use Case #3: ChartList Viewer
+
+        Returns:
+            List of ChartList names in order
+        """
+        logger.info(f"Loading ChartList names from {self.excel_path}")
+
+        df = pd.read_excel(self.excel_path)
+
+        # Normalize column names
+        df.columns = df.columns.str.strip()
+
+        # Check for ChartList column
+        if 'ChartList' not in df.columns:
+            # Try case-insensitive match
+            chartlist_col = None
+            for col in df.columns:
+                if 'chartlist' in col.lower():
+                    chartlist_col = col
+                    break
+
+            if not chartlist_col:
+                raise ValueError("Excel must have a 'ChartList' column")
+        else:
+            chartlist_col = 'ChartList'
+
+        # Extract ChartList names
+        chartlist_names = df[chartlist_col].dropna().str.strip().tolist()
+
+        if not chartlist_names:
+            raise ValueError("No ChartList names found in Excel file")
+
+        logger.info(f"Loaded {len(chartlist_names)} ChartList names")
+        return chartlist_names
+
     def validate_config(self) -> Dict:
         """
         Validate configuration file and return detailed results

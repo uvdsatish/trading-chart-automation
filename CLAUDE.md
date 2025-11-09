@@ -368,9 +368,68 @@ python main.py --mode chartlist-batch --config config/chartlist_config_sample.xl
 
 ---
 
-### Production Use Case #3: TBD
+### Production Use Case #3: ChartList Viewer ✅ COMPLETE
 
-(To be implemented)
+**Purpose**: Open first chart from each ChartList in separate browser tabs based on a simple Excel configuration. Simpler than Use Case #2 - just needs ChartList names.
+
+**Status**: ✅ Fully implemented and tested (Nov 9, 2024)
+
+**Usage:**
+```bash
+# Run with your Excel config containing ChartList names
+python main.py --mode chartlist-viewer --config config/justChartlist-S1-daily.xlsx
+
+# With debug logging
+python main.py --mode chartlist-viewer --config config/justChartlist-S1-daily.xlsx --log-level DEBUG
+```
+
+**Excel Configuration Structure (Single Column):**
+
+| ChartList |
+|-----------|
+| Active_Tickers |
+| Daily_Daily |
+| Daily_60Mins |
+| Daily_Technicals_60Mins_2a |
+| Daily_Technicals_5Mins_2a |
+| Daily_Technicals_60Mins_2b |
+| Daily_Technicals_5Mins_2b |
+
+**How it works:**
+1. Reads Excel file with ChartList names (single column)
+2. Logs in to StockCharts.com (once, shared session)
+3. Navigates to AMZN chart to access ChartList dropdowns
+4. For each ChartList in Excel:
+   - Clicks ChartList dropdown → Selects ChartList
+   - Clicks Chart dropdown → Selects first chart
+   - Opens in new browser tab
+   - Captures screenshot for verification
+5. Browser stays open for manual inspection
+6. User presses Enter when done to close browser
+
+**Key Implementation Details:**
+- **Excel Reader**: `ChartListConfigReader.load_chartlist_names_only()` method
+- **Browser Method**: `StockChartsController.open_chartlists_as_tabs(excel_path)`
+- **Main Function**: `chartlist_viewer()` in main.py
+- **Command**: `--mode chartlist-viewer --config <excel_path>`
+
+**Files Added/Modified:**
+- `src/utils/excel_reader.py`: Added `load_chartlist_names_only()` method
+- `src/browser/stockcharts_controller.py`: Added `open_chartlists_as_tabs()` method
+- `main.py`: Added `chartlist_viewer()` function and `--mode chartlist-viewer`
+
+**Output:**
+- N browser tabs (one per ChartList in Excel)
+- Each tab shows first chart from that ChartList
+- Screenshots saved: `tab{N}_{ChartList}_{ChartName}.png`
+- All tabs remain open until user presses Enter
+
+**Key Differences from Use Case #2:**
+- **Simpler Excel**: Single column (ChartList) vs 5 columns
+- **No ticker specification**: Uses first chart in each ChartList
+- **No ordering**: Sequential processing in Excel order
+- **No timeframe changes**: Uses default chart settings
+- **Less complex**: ~150 lines vs ~400 lines of code
 
 ---
 

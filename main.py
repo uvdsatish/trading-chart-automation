@@ -267,9 +267,9 @@ Examples:
 
     parser.add_argument(
         "--mode",
-        choices=["analysis", "viewer", "chartlist-batch"],
+        choices=["analysis", "viewer", "chartlist-batch", "chartlist-viewer"],
         default="analysis",
-        help="Mode: 'analysis' = AI-powered analysis (default), 'viewer' = manual viewing only, 'chartlist-batch' = open charts from Excel"
+        help="Mode: 'analysis' = AI-powered analysis (default), 'viewer' = manual viewing only, 'chartlist-batch' = open charts from Excel (Use Case 2), 'chartlist-viewer' = open ChartLists from Excel (Use Case 3)"
     )
 
     parser.add_argument(
@@ -294,10 +294,15 @@ Examples:
 
     # Run appropriate mode
     if args.mode == "chartlist-batch":
-        # ChartList batch mode requires Excel config file
+        # ChartList batch mode (Use Case 2) requires Excel config file
         if not args.config:
             parser.error("--config is required for chartlist-batch mode")
         asyncio.run(chartlist_batch_viewer(args.config, config))
+    elif args.mode == "chartlist-viewer":
+        # ChartList viewer mode (Use Case 3) requires Excel config file
+        if not args.config:
+            parser.error("--config is required for chartlist-viewer mode")
+        asyncio.run(chartlist_viewer(args.config, config))
     else:
         # Other modes require ticker
         if not args.ticker:
@@ -392,6 +397,91 @@ async def chartlist_batch_viewer(excel_path: str, config: dict):
             logger.info("\nClosing browser...")
         else:
             logger.error("No charts were opened successfully")
+
+    finally:
+        await browser.close()
+        logger.info("Session complete!")
+
+
+async def chartlist_viewer(excel_path: str, config: dict):
+    """
+    Production Use Case #3: ChartList Viewer
+    Opens first chart from each ChartList in separate tabs based on Excel configuration
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"=" * 70)
+    logger.info(f"CHARTLIST VIEWER (USE CASE #3)")
+    logger.info(f"=" * 70)
+
+    # Load credentials
+    username = os.getenv("STOCKCHARTS_USERNAME")
+    password = os.getenv("STOCKCHARTS_PASSWORD")
+
+    if not all([username, password]):
+        logger.error("Missing credentials in .env file")
+        logger.error("Required: STOCKCHARTS_USERNAME, STOCKCHARTS_PASSWORD")
+        return
+
+    # Check if Excel file exists
+    excel_file = Path(excel_path)
+    if not excel_file.exists():
+        logger.error(f"Excel file not found: {excel_file}")
+        logger.error("Create an Excel file with column: ChartList")
+        return
+
+    # Initialize browser controller
+    browser = StockChartsController(
+        username=username,
+        password=password,
+        headless=False,  # Must be visible for manual inspection
+        screenshot_dir=os.getenv("SCREENSHOT_DIR", "screenshots"),
+        config=config
+    )
+
+    try:
+        # Initialize browser
+        await browser.initialize()
+
+        # Login
+        logger.info("Logging in to StockCharts.com...")
+        login_success = await browser.login()
+
+        if not login_success:
+            logger.error("Login failed")
+            return
+
+        logger.info("[SUCCESS] Login successful!\n")
+
+        # Open ChartLists from Excel
+        opened_tabs = await browser.open_chartlists_as_tabs(excel_file)
+
+        if opened_tabs:
+            logger.info("\n" + "=" * 70)
+            logger.info("BROWSER IS NOW OPEN IN FULLSCREEN MODE")
+            logger.info("=" * 70)
+            logger.info("[NAVIGATION] Switch between tabs: Ctrl+Tab or click tabs")
+            logger.info("[EXIT] Use Alt+F4 to close browser")
+            logger.info("[ALTERNATIVE] Press Enter in this terminal to close")
+            logger.info("=" * 70)
+
+            # Wait for user to finish
+            try:
+                input("\nPress Enter when done viewing charts...")
+            except (EOFError, OSError):
+                logger.info("\n[Non-interactive mode detected]")
+                logger.info("Browser will stay open until you:")
+                logger.info("  1. Close the browser window manually, OR")
+                logger.info("  2. Press Ctrl+C in this terminal")
+                logger.info("Waiting...")
+                try:
+                    while True:
+                        await asyncio.sleep(3600)
+                except KeyboardInterrupt:
+                    logger.info("\nKeyboard interrupt received...")
+
+            logger.info("\nClosing browser...")
+        else:
+            logger.error("No ChartLists were opened successfully")
 
     finally:
         await browser.close()
