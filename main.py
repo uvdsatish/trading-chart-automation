@@ -455,33 +455,40 @@ async def chartlist_viewer(excel_path: str, config: dict):
         # Open ChartLists from Excel
         opened_tabs = await browser.open_chartlists_as_tabs(excel_file)
 
+        # Log result but keep browser open regardless
+        if not opened_tabs:
+            logger.warning("No ChartLists were opened successfully, but keeping browser open for inspection")
+
+        # ALWAYS keep browser open for manual inspection
+        logger.info("\n" + "=" * 70)
+        logger.info("BROWSER IS NOW OPEN IN FULLSCREEN MODE")
+        logger.info("=" * 70)
+        logger.info("[NAVIGATION] Switch between tabs: Ctrl+Tab or click tabs")
+        logger.info("[EXIT] Use Alt+F4 to close browser")
+        logger.info("[ALTERNATIVE] Press Enter in this terminal to close")
+        logger.info("=" * 70)
+
         if opened_tabs:
-            logger.info("\n" + "=" * 70)
-            logger.info("BROWSER IS NOW OPEN IN FULLSCREEN MODE")
-            logger.info("=" * 70)
-            logger.info("[NAVIGATION] Switch between tabs: Ctrl+Tab or click tabs")
-            logger.info("[EXIT] Use Alt+F4 to close browser")
-            logger.info("[ALTERNATIVE] Press Enter in this terminal to close")
-            logger.info("=" * 70)
-
-            # Wait for user to finish
-            try:
-                input("\nPress Enter when done viewing charts...")
-            except (EOFError, OSError):
-                logger.info("\n[Non-interactive mode detected]")
-                logger.info("Browser will stay open until you:")
-                logger.info("  1. Close the browser window manually, OR")
-                logger.info("  2. Press Ctrl+C in this terminal")
-                logger.info("Waiting...")
-                try:
-                    while True:
-                        await asyncio.sleep(3600)
-                except KeyboardInterrupt:
-                    logger.info("\nKeyboard interrupt received...")
-
-            logger.info("\nClosing browser...")
+            logger.info(f"\n{len(opened_tabs)} tab(s) opened successfully")
         else:
-            logger.error("No ChartLists were opened successfully")
+            logger.info("\nNo tabs were opened, but browser is ready for manual inspection")
+
+        # Wait for user to finish
+        try:
+            input("\nPress Enter when done viewing charts...")
+        except (EOFError, OSError):
+            logger.info("\n[Non-interactive mode detected]")
+            logger.info("Browser will stay open until you:")
+            logger.info("  1. Close the browser window manually, OR")
+            logger.info("  2. Press Ctrl+C in this terminal")
+            logger.info("Waiting...")
+            try:
+                while True:
+                    await asyncio.sleep(3600)
+            except KeyboardInterrupt:
+                logger.info("\nKeyboard interrupt received...")
+
+        logger.info("\nClosing browser...")
 
     finally:
         await browser.close()

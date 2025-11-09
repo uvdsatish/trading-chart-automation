@@ -1851,117 +1851,114 @@ class StockChartsController:
                 await asyncio.sleep(1)
                 logger.warning("ChartList dropdown not found, continuing...")
 
+            # Keep the initial AMZN page as is - this becomes Tab 1
+            base_url = self.page.url
+
             # Process each ChartList
             for idx, chartlist_name in enumerate(chartlist_names, 1):
-                logger.info(f"[Tab {idx}/{len(chartlist_names)}] Opening ChartList: {chartlist_name}")
+                logger.info(f"[Tab {idx+1}/{len(chartlist_names)+1}] Opening ChartList: {chartlist_name}")
 
                 try:
+                    # ALWAYS create a new tab for EVERY ChartList
+                    page = await self.context.new_page()
+                    await page.goto(base_url, wait_until='domcontentloaded', timeout=15000)
+
+                    # Wait for page to be ready
+                    try:
+                        await page.wait_for_selector('#chart-list-dropdown-menu-toggle-button', state='visible', timeout=3000)
+                    except:
+                        await asyncio.sleep(1)
+
                     # Click ChartList dropdown
                     chartlist_button_selector = "#chart-list-dropdown-menu-toggle-button"
-                    chartlist_button = await self.page.query_selector(chartlist_button_selector)
+                    chartlist_button = await page.query_selector(chartlist_button_selector)
 
                     if not chartlist_button:
-                        logger.error(f"[Tab {idx}] ChartList dropdown not found")
+                        logger.error(f"[Tab {idx+1}] ChartList dropdown not found")
                         continue
 
                     # Open ChartList dropdown
                     await chartlist_button.click()
-                    await asyncio.sleep(0.5)
+
+                    # Smart wait for dropdown to appear
+                    try:
+                        await page.wait_for_selector('.chartlist-dropdown-menu', state='visible', timeout=3000)
+                    except:
+                        await asyncio.sleep(1)  # Fallback to fixed wait
 
                     # Select the ChartList
-                    chartlist_item = await self.page.query_selector(f"text={chartlist_name}")
+                    chartlist_item = await page.query_selector(f"text={chartlist_name}")
                     if not chartlist_item:
                         # Try partial match
-                        chartlist_item = await self.page.query_selector(f"*:has-text('{chartlist_name}')")
+                        chartlist_item = await page.query_selector(f"*:has-text('{chartlist_name}')")
 
                     if not chartlist_item:
-                        logger.error(f"[Tab {idx}] ChartList '{chartlist_name}' not found in dropdown")
-                        await self.page.keyboard.press("Escape")  # Close dropdown
+                        logger.error(f"[Tab {idx+1}] ChartList '{chartlist_name}' not found in dropdown")
+                        await page.keyboard.press("Escape")  # Close dropdown
                         continue
 
-                    logger.info(f"[Tab {idx}] Selecting ChartList: {chartlist_name}")
+                    logger.info(f"[Tab {idx+1}] Selecting ChartList: {chartlist_name}")
                     await chartlist_item.click()
-                    await asyncio.sleep(1)
 
-                    # Now click Chart dropdown to get first chart
-                    chart_button_selector = "#charts-dropdown-menu-toggle-button"
-                    chart_button = await self.page.query_selector(chart_button_selector)
+                    # Wait for ChartList to load (it will automatically load its first chart)
+                    logger.info(f"[Tab {idx+1}] Waiting for ChartList '{chartlist_name}' to load...")
+                    await asyncio.sleep(3)
 
-                    if not chart_button:
-                        logger.error(f"[Tab {idx}] Chart dropdown not found")
-                        continue
+                    # Extract the chart that was loaded
+                    current_url = page.url
+                    first_chart_name = "Unknown"
 
-                    # Open Chart dropdown
-                    await chart_button.click()
-                    await asyncio.sleep(0.5)
+                    if '?s=' in current_url:
+                        ticker = current_url.split('?s=')[1].split('&')[0]
+                        if ticker and ticker != 'AMZN':
+                            first_chart_name = ticker
+                            logger.info(f"[Tab {idx+1}] ChartList '{chartlist_name}' loaded chart: {first_chart_name}")
+                        else:
+                            first_chart_name = "Default Chart"
 
-                    # Get first chart from the list
-                    # Try to find the first chart link in the dropdown
-                    chart_links = await self.page.locator(".charts-dropdown-menu a").all()
-
-                    if not chart_links:
-                        logger.error(f"[Tab {idx}] No charts found in ChartList '{chartlist_name}'")
-                        await self.page.keyboard.press("Escape")  # Close dropdown
-                        continue
-
-                    # Click first chart
-                    first_chart_element = chart_links[0]
-                    first_chart_name = await first_chart_element.inner_text()
-                    logger.info(f"[Tab {idx}] Opening first chart: {first_chart_name}")
-
-                    await first_chart_element.click()
-
-                    # Wait for chart to load
+                    # Check if we have a chart image
                     try:
-                        await self.page.wait_for_selector('.chart-image', state='visible', timeout=3000)
+                        chart_image = await page.query_selector('.chart-image')
+                        if not chart_image:
+                            logger.warning(f"[Tab {idx+1}] No chart image found for '{chartlist_name}'")
                     except:
-                        await asyncio.sleep(1)
-
-                    # Create new tab (if not first chart)
-                    if idx > 1:
-                        page = await self.context.new_page()
-                        await page.goto(self.page.url, wait_until='domcontentloaded', timeout=15000)
-                        try:
-                            await page.wait_for_selector('.chart-image', state='visible', timeout=3000)
-                        except:
-                            await asyncio.sleep(1)
-                    else:
-                        page = self.page
+                        pass
 
                     # Apply fullscreen maximization
                     if not self.headless:
                         await FullscreenManager.maximize_stockcharts_chart(page)
 
                     # Capture screenshot
-                    screenshot_filename = f"tab{idx}_{chartlist_name.replace(' ', '_')}_{first_chart_name.replace(' ', '_')}.png"
+                    screenshot_filename = f"tab{idx+1}_{chartlist_name.replace(' ', '_')}_{first_chart_name.replace(' ', '_')}.png"
                     screenshot_path = self.screenshot_dir / screenshot_filename
                     await page.screenshot(path=str(screenshot_path))
-                    logger.info(f"[Tab {idx}] Screenshot saved: {screenshot_path}")
+                    logger.info(f"[Tab {idx+1}] Screenshot saved: {screenshot_path}")
 
-                    # Store tab info
-                    opened_tabs[idx] = {
+                    # Store tab info (using idx+1 since tab 1 is the initial AMZN page)
+                    opened_tabs[idx+1] = {
                         "page": page,
                         "chartlist_name": chartlist_name,
                         "chart_name": first_chart_name,
                         "screenshot_path": str(screenshot_path)
                     }
 
-                    logger.info(f"[Tab {idx}] [SUCCESS] Opened {chartlist_name} > {first_chart_name}")
+                    logger.info(f"[Tab {idx+1}] [SUCCESS] Opened {chartlist_name} > {first_chart_name}")
 
                 except Exception as e:
-                    logger.error(f"[Tab {idx}] Error opening ChartList '{chartlist_name}': {e}")
+                    logger.error(f"[Tab {idx+1}] Error opening ChartList '{chartlist_name}': {e}")
                     continue
 
-            # Summary
+            # Summary (remember tab 1 is the initial AMZN page)
             logger.info("\n" + "=" * 70)
             logger.info(f"ALL TABS OPENED - {len(opened_tabs)}/{len(chartlist_names)} successful")
             logger.info("=" * 70)
+            logger.info("Tab 1: AMZN (initial navigation page)")
 
             if opened_tabs:
-                logger.info("\nTabs open (in order):")
+                logger.info("Tabs open (in order):")
                 for tab_num in sorted(opened_tabs.keys()):
                     tab_info = opened_tabs[tab_num]
-                    logger.info(f"  {tab_num}. {tab_info['chartlist_name']} > {tab_info['chart_name']}")
+                    logger.info(f"  Tab {tab_num}: {tab_info['chartlist_name']} > {tab_info['chart_name']}")
 
             return opened_tabs
 
