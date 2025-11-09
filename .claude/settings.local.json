@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(python create_excel_template.py:*)",
+      "Bash(dir:*)",
+      "Bash(C:Usersuvdsa.condaenvsbrowser_automationpython.exe -c \"import sys; print(sys.executable)\")",
+      "Bash(\"C:\\Users\\uvdsa\\.conda\\envs\\browser_automation\\python.exe\" -m pip list)",
+      "Bash(\"C:\\Users\\uvdsa\\.conda\\envs\\browser_automation\\python.exe\" -c \"import playwright; print(''Playwright installed at:'', playwright.__file__)\")",
+      "Bash(where python:*)",
+      "Bash(conda env list:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -522,13 +522,257 @@ class ChartAnalyzer:
     def _extract_macd_info(self, text: str) -> Dict:
         """Extract MACD information from text"""
         text_lower = text.lower()
-        
+
         signal = "neutral"
         if "bullish" in text_lower and "macd" in text_lower:
             signal = "bullish"
         elif "bearish" in text_lower and "macd" in text_lower:
             signal = "bearish"
-        
+
         return {
             "signal": signal
+        }
+
+    async def analyze_multi_timeframe_chart(
+        self,
+        screenshots: Dict[str, Path],
+        ticker: str
+    ) -> Dict:
+        """
+        Analyze multiple timeframes of the same ticker simultaneously
+
+        Args:
+            screenshots: Dict mapping timeframe names to screenshot paths
+                        e.g., {"Daily": path1, "60min": path2, "5min": path3}
+            ticker: Stock symbol for context
+
+        Returns:
+            Dict: Multi-timeframe analysis with cross-timeframe insights
+        """
+        logger.info(f"Analyzing multi-timeframe charts for {ticker}...")
+
+        try:
+            # Prepare content with all images
+            content = []
+
+            # Add all images to the content
+            for timeframe, image_path in screenshots.items():
+                image_data = self._encode_image(image_path)
+                media_type = self._get_media_type(image_path)
+
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": image_data,
+                    },
+                })
+
+                # Add label for each image
+                content.append({
+                    "type": "text",
+                    "text": f"[{timeframe} Chart]"
+                })
+
+            # Add the analysis prompt
+            prompt = self._build_multi_timeframe_prompt(ticker, list(screenshots.keys()))
+            content.append({
+                "type": "text",
+                "text": prompt
+            })
+
+            # Call Claude API with all images
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": content
+                    }
+                ],
+            )
+
+            # Parse response
+            response_text = message.content[0].text
+            logger.debug(f"Raw multi-timeframe AI response: {response_text}")
+
+            # Try to extract JSON if present
+            analysis = self._parse_multi_timeframe_response(response_text)
+            analysis["ticker"] = ticker
+            analysis["timeframes"] = list(screenshots.keys())
+
+            logger.info(f"Multi-timeframe analysis completed for {ticker}")
+            return analysis
+
+        except Exception as e:
+            logger.error(f"Error analyzing multi-timeframe charts: {e}")
+            return {
+                "error": str(e),
+                "ticker": ticker,
+                "timeframes": list(screenshots.keys()),
+                "trend_alignment": "unknown",
+                "confluence_levels": [],
+                "best_entry_timeframe": "unknown",
+                "pattern_confirmation": "unknown",
+                "divergences": [],
+                "recommended_alerts": [],
+                "multi_timeframe_risk": "unknown",
+                "summary": f"Error occurred during analysis: {e}"
+            }
+
+    def _build_multi_timeframe_prompt(self, ticker: str, timeframes: List[str]) -> str:
+        """Build prompt for multi-timeframe analysis"""
+        timeframes_str = ", ".join(timeframes)
+
+        prompt = f"""
+        You are analyzing {len(timeframes)} different timeframes for {ticker} simultaneously: {timeframes_str}.
+
+        IMPORTANT: You have Weekly (longer-term trend), Daily (medium-term), 60min (intraday swing), and 5min (entry timing).
+        This combination provides complete market context from position trading to scalping perspectives.
+
+        Please provide a comprehensive MULTI-TIMEFRAME analysis focusing on cross-timeframe relationships:
+
+        1. **Trend Alignment Hierarchy** (Top-Down Analysis):
+           - Weekly trend (primary/dominant trend) - most important
+           - Daily trend alignment with weekly
+           - 60min trend alignment with daily
+           - 5min trend for precise entries
+           - Overall trend consensus (bullish/bearish/mixed)
+           - Strength of alignment (strong/moderate/weak)
+
+        2. **Support/Resistance Confluence**:
+           - Identify price levels that appear as significant across MULTIPLE timeframes
+           - Weekly levels are strongest, then daily, then intraday
+           - List 3-5 key confluence levels with their significance
+           - Note which timeframes validate each level
+
+        3. **Best Entry/Exit Strategy by Timeframe**:
+           - Weekly: Position direction and major targets
+           - Daily: Swing trade entry zones
+           - 60min: Intraday entry timing
+           - 5min: Precise entry trigger and stop placement
+           - Which timeframe currently shows the best risk/reward?
+
+        4. **Pattern Confirmation Cascade**:
+           - Do Weekly patterns validate Daily patterns?
+           - Do Daily patterns confirm 60min setups?
+           - Are 5min patterns aligned with higher timeframes?
+           - Multi-timeframe pattern strength assessment
+
+        5. **Divergences and Conflicts**:
+           - Any conflicts between timeframes (warning signs)?
+           - Is Weekly/Daily showing different direction than intraday?
+           - Any divergences that suggest caution or opportunity?
+
+        6. **Recommended Alerts** (Multi-Timeframe Context):
+           - 3-5 specific price levels considering ALL timeframes
+           - Prioritize levels with multi-timeframe confluence
+           - Include alert type and reasoning
+           - Note which timeframe each alert is based on
+
+        7. **Multi-Timeframe Risk Assessment**:
+           - Overall risk level considering all timeframes (low/medium/high)
+           - Risk factors from cross-timeframe analysis
+           - Confidence level based on timeframe alignment
+
+        8. **Trading Strategy Summary**:
+           - Position trade potential (Weekly/Daily)
+           - Swing trade setup (Daily/60min)
+           - Day trade opportunity (60min/5min)
+           - Best timeframe combination for current market conditions
+
+        Please format your response as JSON with this structure:
+        {{
+            "trend_alignment": {{
+                "consensus": "bullish|bearish|mixed|sideways",
+                "strength": "strong|moderate|weak",
+                "details": "Which timeframes agree/disagree and why",
+                "timeframe_trends": {{
+                    "Weekly": "uptrend|downtrend|sideways",
+                    "Daily": "uptrend|downtrend|sideways",
+                    "60min": "uptrend|downtrend|sideways",
+                    "5min": "uptrend|downtrend|sideways"
+                }}
+            }},
+            "confluence_levels": [
+                {{
+                    "price": 150.25,
+                    "type": "support|resistance",
+                    "timeframes": ["Weekly", "Daily", "60min"],
+                    "significance": "high|medium|low",
+                    "notes": "Why this level is important"
+                }}
+            ],
+            "best_entry_timeframe": "5min",
+            "best_entry_reasoning": "Explanation of why this timeframe is best for entry",
+            "pattern_confirmation": {{
+                "confirmed": true,
+                "details": "Higher timeframe patterns confirm lower timeframe",
+                "pattern_strength": "strong|moderate|weak"
+            }},
+            "divergences": [
+                "List any conflicts or warning signs between timeframes"
+            ],
+            "recommended_alerts": [
+                {{
+                    "price": 155.00,
+                    "type": "breakout|breakdown|support_test|resistance_test",
+                    "reason": "Multi-timeframe confluence at this level",
+                    "priority": "high|medium|low",
+                    "timeframes_supporting": ["Daily", "60min"]
+                }}
+            ],
+            "multi_timeframe_risk": {{
+                "level": "low|medium|high",
+                "factors": ["Risk factor 1", "Risk factor 2"],
+                "confidence": "high|medium|low"
+            }},
+            "trading_strategy": {{
+                "approach": "aggressive|moderate|conservative",
+                "entry_strategy": "Specific entry recommendation",
+                "exit_strategy": "Specific exit recommendation",
+                "position_sizing": "Suggested position size based on risk"
+            }},
+            "summary": "2-3 sentence overall assessment combining all timeframes"
+        }}
+
+        Be specific with price levels and provide actionable insights that can only be gained by viewing all timeframes together.
+        """
+        return prompt
+
+    def _parse_multi_timeframe_response(self, response_text: str) -> Dict:
+        """Parse multi-timeframe analysis response"""
+        try:
+            # Look for JSON block
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}') + 1
+
+            if start_idx != -1 and end_idx != 0:
+                json_str = response_text[start_idx:end_idx]
+                return json.loads(json_str)
+        except json.JSONDecodeError:
+            logger.warning("Could not parse JSON from multi-timeframe response")
+
+        # Fallback: Return structure with raw text
+        return {
+            "trend_alignment": {
+                "consensus": "unknown",
+                "strength": "unknown",
+                "details": "Could not parse structured response"
+            },
+            "confluence_levels": [],
+            "best_entry_timeframe": "unknown",
+            "pattern_confirmation": {"confirmed": False, "details": "Could not parse"},
+            "divergences": [],
+            "recommended_alerts": [],
+            "multi_timeframe_risk": {"level": "unknown", "factors": [], "confidence": "low"},
+            "trading_strategy": {
+                "approach": "unknown",
+                "entry_strategy": "See raw analysis",
+                "exit_strategy": "See raw analysis"
+            },
+            "raw_analysis": response_text,
+            "summary": "Analysis completed but structured parsing failed. See raw_analysis field."
         }
