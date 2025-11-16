@@ -1,0 +1,6 @@
+# Columnar Template - One item per line
+# Delete these comment lines and add your items below
+# Example:
+# AAPL
+# MSFT
+# GOOGL

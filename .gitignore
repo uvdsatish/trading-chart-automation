@@ -68,3 +68,7 @@ browser_session.json
 # Excel temporary files
 ~$*.xlsx
 ~$*.xls
+
+# Use Case #4: Set Operations
+use_cases/04_set_operations/output/*
+!use_cases/04_set_operations/output/.gitkeep

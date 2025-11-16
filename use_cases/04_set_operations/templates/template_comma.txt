@@ -1,0 +1,3 @@
+# Comma-Separated Template
+# Delete this comment line and add comma-separated items below
+# Example: AAPL, MSFT, GOOGL, NVDA, AMD
