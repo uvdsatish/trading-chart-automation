@@ -159,6 +159,57 @@ Use: `--output-format comma`
 ```
 Use: `--output-format json`
 
+## Format Conversion (NEW!)
+
+Convert between different list formats without performing set operations.
+
+### Quick Conversion Examples
+
+```bash
+# Columnar → Comma-separated
+python bin/set_operations.py --convert -a tickers.txt --to-format comma
+
+# Comma → Columnar
+python bin/set_operations.py --convert -a "AAPL,MSFT,GOOGL" --to-format columnar
+
+# File → JSON
+python bin/set_operations.py --convert -a list.txt --to-format json --output data.json
+
+# With sorting
+python bin/set_operations.py --convert -a unsorted.txt --to-format columnar --sort
+```
+
+### Batch Conversion Scripts
+
+```bash
+# Windows batch scripts for easy conversion
+scripts\batch\convert_to_comma.bat input.txt output.csv
+scripts\batch\convert_to_columnar.bat comma_list.txt columnar.txt
+scripts\batch\convert_interactive.bat  # Interactive wizard
+```
+
+### Conversion Use Cases
+
+**Excel Import/Export:**
+```bash
+# StockCharts columnar → Excel CSV
+python bin/set_operations.py --convert -a chartlist.txt --to-format comma --output excel.csv
+
+# Excel CSV → StockCharts columnar
+python bin/set_operations.py --convert -a excel.csv --to-format columnar --output chartlist.txt
+```
+
+**Quick Format Switch:**
+```bash
+# Direct conversion (no files)
+python bin/set_operations.py --convert -a "SPY,QQQ,DIA,IWM" --to-format columnar
+# Output:
+# SPY
+# QQQ
+# DIA
+# IWM
+```
+
 ## Trading Use Cases
 
 ### 1. Portfolio Rebalancing

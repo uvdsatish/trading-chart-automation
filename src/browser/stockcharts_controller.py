@@ -25,25 +25,30 @@ class StockChartsController:
         password: str,
         headless: bool = False,
         screenshot_dir: str = "screenshots",
-        config: Optional[Dict] = None
+        config: Optional[Dict] = None,
+        session_id: Optional[str] = None
     ):
         self.username = username
         self.password = password
         self.headless = headless
         self.screenshot_dir = Path(screenshot_dir)
         self.config = config or {}
-        
+        self.session_id = session_id or "default"
+
         # Browser instances
         self.playwright = None
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
-        
+
         # State tracking
         self.is_logged_in = False
         self.current_ticker: Optional[str] = None
         self.current_chartlist: Optional[str] = None  # Cache current ChartList to avoid re-selection
-        
+
+        # Session file path (unique per instance)
+        self.session_file = Path(f"browser_session_{self.session_id}.json")
+
         # Ensure screenshot directory exists
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
     
@@ -76,14 +81,12 @@ class StockChartsController:
         user_agent = self.config.get('browser', {}).get('user_agent')
 
         # Check for saved session state
-        from pathlib import Path
-        session_file = Path("browser_session.json")
         storage_state = None
 
-        if session_file.exists():
+        if self.session_file.exists():
             try:
-                logger.info("Found saved browser session, attempting to restore...")
-                storage_state = session_file.as_posix()
+                logger.info(f"Found saved browser session for {self.session_id}, attempting to restore...")
+                storage_state = self.session_file.as_posix()
             except Exception as e:
                 logger.warning(f"Could not load session file: {e}")
 
@@ -128,7 +131,7 @@ class StockChartsController:
         self.page.set_default_timeout(timeout)
 
         # Check if session was restored successfully
-        if storage_state and session_file.exists():
+        if storage_state and self.session_file.exists():
             # Try navigating to a protected page to verify session is valid
             try:
                 logger.info("Verifying restored session...")
@@ -924,10 +927,8 @@ class StockChartsController:
 
                         # Save session state for future runs
                         try:
-                            from pathlib import Path
-                            session_file = Path("browser_session.json")
-                            await self.context.storage_state(path=session_file.as_posix())
-                            logger.info(f"Session saved to {session_file} for future use")
+                            await self.context.storage_state(path=self.session_file.as_posix())
+                            logger.info(f"Session saved to {self.session_file} for future use")
                         except Exception as e:
                             logger.warning(f"Could not save session: {e}")
 

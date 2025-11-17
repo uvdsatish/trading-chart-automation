@@ -1,4 +1,1 @@
-banana
-date
-grape
-kiwi
+AMX/20, DINO/10, KEP/20, LCID/10, PAHC/20, TVTX/20,AMBQ/20, CAL/20, CZR/20, HELE/20

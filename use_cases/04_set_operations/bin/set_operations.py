@@ -18,6 +18,10 @@ Usage Examples:
 
     # With custom delimiter
     python set_operations.py -a "apple|banana|cherry" -b "banana" --delimiter "|"
+
+    # Format conversion (NEW)
+    python set_operations.py --convert -a list.txt --to-format comma
+    python set_operations.py --convert -a "A,B,C" --to-format columnar
 """
 
 import argparse
@@ -79,19 +83,25 @@ class SetOperationsUtility:
 
         # Auto-detect format if no delimiter specified
         if delimiter is None:
-            # Check for common delimiters
-            if '\n' in input_data:
-                delimiter = '\n'  # Columnar format
-            elif ',' in input_data:
-                delimiter = ','   # CSV format
-            elif ';' in input_data:
-                delimiter = ';'   # Semicolon separated
-            elif '\t' in input_data:
-                delimiter = '\t'  # Tab separated
-            elif '|' in input_data:
-                delimiter = '|'   # Pipe separated
+            # Smart delimiter detection: count occurrences and use the most frequent
+            # Special handling: if input is a single line with commas, prefer comma over newline
+            delimiter_counts = {
+                ',': input_data.count(','),
+                '\n': input_data.count('\n'),
+                ';': input_data.count(';'),
+                '\t': input_data.count('\t'),
+                '|': input_data.count('|')
+            }
+
+            # If we have commas and only 0-1 newlines (single line or line with trailing newline),
+            # prefer comma delimiter
+            if delimiter_counts[','] > 0 and delimiter_counts['\n'] <= 1:
+                delimiter = ','
+            # Otherwise, use the delimiter with the most occurrences
+            elif max(delimiter_counts.values()) > 0:
+                delimiter = max(delimiter_counts, key=delimiter_counts.get)
             else:
-                delimiter = ','   # Default to comma
+                delimiter = ','  # Default to comma
 
         # Split by delimiter
         raw_items = input_data.split(delimiter)
@@ -433,11 +443,93 @@ Operators:
     parser.add_argument('--clipboard', action='store_true',
                        help='Copy result to clipboard')
 
+    # Format conversion mode arguments
+    conversion_group = parser.add_argument_group('Format Conversion')
+    conversion_group.add_argument('--convert', action='store_true',
+                                 help='Convert format without set operations (requires only -a)')
+    conversion_group.add_argument('--to-format',
+                                 choices=['columnar', 'comma', 'json', 'column', 'csv'],
+                                 help='Output format for conversion mode')
+
     args = parser.parse_args()
 
     utility = SetOperationsUtility()
     utility.verbose = args.verbose
     utility.case_sensitive = not args.ignore_case
+
+    # CONVERSION MODE - Handle format conversion without set operations
+    if args.convert:
+        if not args.set_a:
+            print("[ERROR] Conversion mode requires -a (input data)", file=sys.stderr)
+            sys.exit(1)
+
+        # Parse input (auto-detect format)
+        try:
+            items = utility.parse_input(args.set_a, args.delimiter)
+        except Exception as e:
+            print(f"[ERROR] Failed to parse input: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if args.verbose:
+            print(f"[INFO] Converting {len(items)} unique items", file=sys.stderr)
+
+        # Determine output format
+        output_format = args.to_format or args.output_format
+
+        # Map format aliases
+        if output_format == 'column':
+            output_format = 'columnar'
+        elif output_format == 'csv':
+            output_format = 'comma'
+
+        # If no format specified, auto-detect opposite of input
+        if not output_format or output_format == 'auto':
+            # If input looks like columnar (has newlines or is a file), default to comma
+            if '\n' in args.set_a or os.path.isfile(args.set_a):
+                output_format = 'comma'
+                if args.verbose:
+                    print("[INFO] Auto-detected: Converting to comma-separated format", file=sys.stderr)
+            else:
+                output_format = 'columnar'
+                if args.verbose:
+                    print("[INFO] Auto-detected: Converting to columnar format", file=sys.stderr)
+
+        # Format output
+        if output_format == 'columnar':
+            output = utility.format_output(items, 'columnar', sort=args.sort)
+        elif output_format == 'comma':
+            output = utility.format_output(items, 'comma', sort=args.sort)
+        elif output_format == 'json':
+            output = utility.format_output(items, 'json', sort=args.sort)
+        else:
+            output = utility.format_output(items, 'delimiter',
+                                         delimiter=args.output_delimiter,
+                                         sort=args.sort)
+
+        # Output result
+        if args.output:
+            try:
+                with open(args.output, 'w', encoding='utf-8') as f:
+                    f.write(output)
+                print(f"[SUCCESS] Converted {len(items)} items to {output_format} format")
+                print(f"[SUCCESS] Result saved to {args.output}")
+            except Exception as e:
+                print(f"[ERROR] Failed to save output: {e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print(output)
+
+        # Copy to clipboard if requested
+        if args.clipboard:
+            if CLIPBOARD_AVAILABLE:
+                pyperclip.copy(output)
+                print("[SUCCESS] Result copied to clipboard")
+            else:
+                print("[WARNING] pyperclip not installed. Install with: pip install pyperclip",
+                      file=sys.stderr)
+
+        # Exit after conversion - don't continue to set operations
+        sys.exit(0)
 
     # If no sets provided, run interactive mode
     if not args.set_a:

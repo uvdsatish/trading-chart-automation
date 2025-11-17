@@ -1,7 +1,1 @@
-apple
-banana
-cherry
-date
-elderberry
-fig
-grape
+ AGX/20, AMX/20, COLO/10, GVAL/10, KEP/20, PAHC/20, PUK/20, SBS/10, WDC/20,CZR/20

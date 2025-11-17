@@ -44,6 +44,18 @@ cd scripts\batch
 ticker_diff.bat ..\..\examples\tickers\watchlist_tech.txt ..\..\examples\tickers\portfolio_current.txt
 ```
 
+## 6. Format Conversion (NEW! - 30 seconds)
+```bash
+# Convert columnar list to comma-separated
+python bin/set_operations.py --convert -a examples/tickers/watchlist_tech.txt --to-format comma
+
+# Convert comma to columnar
+python bin/set_operations.py --convert -a "AAPL,MSFT,GOOGL,NVDA" --to-format columnar
+
+# Use batch script for quick conversion
+scripts\batch\convert_to_comma.bat input.txt output.csv
+```
+
 ## Next Steps
 - Read full documentation: [README.md](README.md)
 - Try ticker examples: `python scripts/demos/ticker_examples.py`
